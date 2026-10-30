@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.8-public')
+script_version('1.0.9-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.8-public'
+local SCRIPT_VERSION = '1.0.9-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -42,6 +42,66 @@ local UPDATE_MANIFEST = UPDATE_BASE .. 'version.json'
 local HELP_BOT_TOKEN = '9294611001:AAGJZXwHb12SFaLBs7KB6L_3rmnNh_JcTxE'
 local HELP_ADMIN_CHAT_ID = '821562814'
 local HELP_REPLIES_URL = UPDATE_BASE .. 'help_replies.json'
+
+-- Ранний выход ДО sampev/mimgui: иначе public+notify / reload роняют lua51.dll
+do
+  local wd = getWorkingDirectory()
+  local function exists(p)
+    local f = io.open(p, 'rb')
+    if f then f:close() return true end
+    return false
+  end
+  local function read_all(p)
+    local f = io.open(p, 'rb')
+    if not f then return nil end
+    local d = f:read('*a')
+    f:close()
+    return d
+  end
+  local function write_all(p, d)
+    local f = io.open(p, 'wb')
+    if not f then return false end
+    f:write(d)
+    f:close()
+    return true
+  end
+  -- На ПК автора лежит arizona_tg_notify.lua — public только для друзей
+  if exists(wd .. '\\arizona_tg_notify.lua') then
+    print('[Arizona TG Public] SKIP: найден arizona_tg_notify.lua. Удали arizona_tg_public.lua — оба сразу крашат GTA.')
+    function main() wait(-1) end
+    return
+  end
+  -- Стадийное обновление: файлы из _tgpub_next копируем при старте, без reload() в бою
+  local next_dir = wd .. '\\_tgpub_next'
+  local next_main = next_dir .. '\\arizona_tg_public.lua'
+  if exists(next_main) then
+    local pairs_ = {
+      { next_dir .. '\\arizona_tg_public.lua', wd .. '\\arizona_tg_public.lua' },
+      { next_dir .. '\\lib\\arizona_tg_public_ui.lua', wd .. '\\lib\\arizona_tg_public_ui.lua' },
+      { next_dir .. '\\lib\\arizona_ipc_public.lua', wd .. '\\lib\\arizona_ipc_public.lua' },
+    }
+    for i = 1, #pairs_ do
+      local src, dst = pairs_[i][1], pairs_[i][2]
+      local data = read_all(src)
+      if data then
+        write_all(dst, data)
+        pcall(os.remove, src)
+      end
+    end
+    pcall(os.remove, next_dir .. '\\version.json')
+    print('[Arizona TG Public] Обновление из _tgpub_next применено — перезагрузка скрипта')
+    function main()
+      wait(50)
+      pcall(function()
+        if thisScript and thisScript() and thisScript().reload then
+          thisScript():reload()
+        end
+      end)
+      wait(-1)
+    end
+    return
+  end
+end
 
 local encoding = require 'encoding'
 encoding.default = 'CP1251'
@@ -544,6 +604,8 @@ local function update_apply_manifest(manifest, silent)
   update_state.msg = 'скачиваю ' .. ver
   if not silent then chat('Обновление до ' .. ver .. '…') end
 
+  -- Пишем во _tgpub_next (не в живые .lua): overwrite + reload/AutoReboot = C0000005 в lua51
+  local stage = ROOT .. '\\_tgpub_next'
   for i = 1, #files do
     local item = files[i]
     if type(item) == 'table' then
@@ -555,7 +617,6 @@ local function update_apply_manifest(manifest, silent)
         if not silent then chat('Обновление: ошибка списка файлов') end
         return false
       end
-      -- ini/токены никогда не трогаем
       local low = rel:lower():gsub('\\', '/')
       if low:find('%.ini$') or low:find('config/') then
         -- skip
@@ -568,7 +629,7 @@ local function update_apply_manifest(manifest, silent)
           if not silent then chat('Обновление: не скачался ' .. rel) end
           return false
         end
-        local dest = ROOT .. '\\' .. rel:gsub('/', '\\')
+        local dest = stage .. '\\' .. rel:gsub('/', '\\')
         ensure_parent_dir(dest)
         if not write_file(dest, body) then
           update_state.status = 'error'
@@ -579,20 +640,11 @@ local function update_apply_manifest(manifest, silent)
       end
     end
   end
+  write_file(stage .. '\\version.json', '{"version":"' .. ver .. '"}\n')
 
   update_state.status = 'ready'
-  update_state.msg = 'установлено ' .. ver .. ' · перезапуск'
-  chat('TG Public обновлён до ' .. ver .. ' · перезагрузка через 2с')
-  -- отложенный reload: мгновенный thisScript():reload() после записи файла
-  -- у части клиентов роняет весь процесс GTA
-  lua_thread.create(function()
-    wait(2000)
-    pcall(function()
-      if thisScript and thisScript() and thisScript().reload then
-        thisScript():reload()
-      end
-    end)
-  end)
+  update_state.msg = 'скачано ' .. ver .. ' · перезайди в игру'
+  chat('TG Public ' .. ver .. ' скачан. Полностью закрой GTA и зайди снова (без reload).')
   return true
 end
 
