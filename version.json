@@ -1,5 +1,5 @@
 {
-  "version": "1.0.2-public",
+  "version": "1.0.3-public",
   "files": [
     { "path": "arizona_tg_public.lua", "url": "arizona_tg_public.lua" },
     { "path": "lib/arizona_tg_public_ui.lua", "url": "lib/arizona_tg_public_ui.lua" },

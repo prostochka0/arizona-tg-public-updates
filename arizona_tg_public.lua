@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.2-public')
+script_version('1.0.3-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.2-public'
+local SCRIPT_VERSION = '1.0.3-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -39,8 +39,8 @@ local UPDATE_BASE = string.format(
 local UPDATE_MANIFEST = UPDATE_BASE .. 'version.json'
 
 -- Система помощи: support-бот (заявки → админ). Плейсхолдеры — пока не настроены.
-local HELP_BOT_TOKEN = 'YOUR_HELP_BOT_TOKEN'
-local HELP_ADMIN_CHAT_ID = 'YOUR_HELP_ADMIN_CHAT_ID'
+local HELP_BOT_TOKEN = '9294611001:AAGJZXwHb12SFaLBs7KB6L_3rmnNh_JcTxE'
+local HELP_ADMIN_CHAT_ID = '821562814'
 local HELP_REPLIES_URL = UPDATE_BASE .. 'help_replies.json'
 
 local encoding = require 'encoding'
@@ -432,6 +432,8 @@ local function write_file(path, data)
   return true
 end
 
+-- update+help in one closure (Lua 5.1 200-local limit)
+local extras = (function()
 local function ensure_parent_dir(path)
   local dir = tostring(path or ''):match('^(.*)[/\\][^/\\]+$')
   if not dir or dir == '' then return end
@@ -1418,6 +1420,22 @@ local function help_poll_replies(force)
     help_state.busy = false
   end)
 end
+
+  return {
+    update_check = update_check,
+    get_update_state = get_update_state,
+    update_configured = update_configured,
+    help_configured = help_configured,
+    help_send = help_send,
+    help_poll_replies = help_poll_replies,
+    help_get_tickets = help_get_tickets,
+    help_get_state = help_get_state,
+    help_get_sel = help_get_sel,
+    help_set_sel = help_set_sel,
+    help_load_tickets = help_load_tickets,
+    help_ensure_client_id = help_ensure_client_id,
+  }
+end)()
 
 local function get_nearby_players(radius, limit)
   radius = tonumber(radius) or 50
@@ -2759,17 +2777,17 @@ P.events_apply_rename = events_apply_rename
 P.events_cancel_rename = events_cancel_rename
 P.events_get_rename_key = events_get_rename_key
 P.SCRIPT_VERSION = SCRIPT_VERSION
-P.update_check = update_check
-P.get_update_state = get_update_state
-P.update_configured = update_configured
-P.help_configured = help_configured
-P.help_send = help_send
-P.help_poll_replies = help_poll_replies
-P.help_get_tickets = help_get_tickets
-P.help_get_state = help_get_state
-P.help_get_sel = help_get_sel
-P.help_set_sel = help_set_sel
-P.help_load_tickets = help_load_tickets
+P.update_check = extras.update_check
+P.get_update_state = extras.get_update_state
+P.update_configured = extras.update_configured
+P.help_configured = extras.help_configured
+P.help_send = extras.help_send
+P.help_poll_replies = extras.help_poll_replies
+P.help_get_tickets = extras.help_get_tickets
+P.help_get_state = extras.help_get_state
+P.help_get_sel = extras.help_get_sel
+P.help_set_sel = extras.help_set_sel
+P.help_load_tickets = extras.help_load_tickets
 P.read_char_buf = read_char_buf
 
 imgui.OnFrame(
@@ -2817,8 +2835,8 @@ function main()
   end
   sync_ui_from_cfg()
   load_state()
-  help_load_tickets()
-  help_ensure_client_id()
+  extras.help_load_tickets()
+  extras.help_ensure_client_id()
   local nforms = load_form_cmds()
   do
     local cached = read_file(EVENTS_CACHE)
@@ -2837,19 +2855,19 @@ function main()
   -- тихое автообновление через несколько секунд после входа
   lua_thread.create(function()
     wait(8000)
-    update_check(false, true)
+    extras.update_check(false, true)
   end)
   lua_thread.create(function()
     wait(12000)
     while true do
-      help_poll_replies(false)
+      extras.help_poll_replies(false)
       wait(30000)
     end
   end)
 
   pcall(sampRegisterChatCommand, 'tgpub', function() toggle_menu() end)
   pcall(sampRegisterChatCommand, 'tgpubupdate', function()
-    update_check(true, false)
+    extras.update_check(true, false)
   end)
   pcall(sampRegisterChatCommand, 'tgptest', function()
     notify('test', cp('Arizona Public · Тест\nЕсли видите это — ваш бот работает.'), {})
