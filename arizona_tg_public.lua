@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.7-public')
+script_version('1.0.8-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.7-public'
+local SCRIPT_VERSION = '1.0.8-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -53,11 +53,13 @@ end
 local sampev = require 'lib.samp.events'
 local requests = require 'requests'
 local json = require 'cjson.safe'
-local imgui = require 'mimgui'
 local ipc = require 'arizona_ipc_public'
 local bit = require 'bit'
-package.loaded['arizona_tg_public_ui'] = nil
-local menu_ui = require 'arizona_tg_public_ui'
+-- mimgui + UI подключаются ЛЕНИВО (ensure_imgui): при старте вместе с MCR/AdminMP
+-- require mimgui часто роняет весь клиент GTA без Lua-ошибки в логе
+local imgui = nil
+local menu_ui = nil
+local imgui_ready = false
 
 local ffi = require 'ffi'
 local _get_tick = nil
@@ -126,43 +128,22 @@ local last_push_kind = '-'
 local last_push_at = 0
 local last_report_push = { queue = nil, reason = nil, at = 0 }
 
-local showMenu = imgui.new.bool(false)
+-- plain table до инициализации mimgui (доступ [0] как у imgui.new.bool)
+local showMenu = { [0] = false }
 local styleReady = false
 local menuTab = 1
-local P -- forward decl: нужен OnFrame до полного заполнения таблицы
+local P -- forward decl
 local utils_sel_id = -1
 local utils_favs = { '/admins', '/re', '/time', '/leaders' }
 local utils_hist = {}
 local utils_notes = {}
 local HIST_MAX = 16
 local FAV_MAX = 12
-local ui = {
-  reports = imgui.new.bool(true),
-  forms = imgui.new.bool(true),
-  mentions = imgui.new.bool(true),
-  watch_queue = imgui.new.bool(true),
-  quiet_mode = imgui.new.bool(false),
-  queue_from = imgui.new.int(10),
-  queue_afk_from = imgui.new.int(5),
-  afk_sec = imgui.new.int(90),
-  cooldown = imgui.new.int(3),
-  send_clips = imgui.new.bool(true),
-  utils_radius = imgui.new.int(50),
-  utils_cmd = imgui.new.char[96](),
-  utils_note = imgui.new.char[128](),
-  utils_pm = imgui.new.char[128](),
-  events_rename = imgui.new.char[96](),
-  events_add = imgui.new.char[96](),
-  org_add = imgui.new.char[96](),
-  bot_token = imgui.new.char[192](),
-  chat_id = imgui.new.char[64](),
-  help_text = imgui.new.char[1024](),
-  win_w = imgui.new.int(1000),
-  win_h = imgui.new.int(640),
-}
+local ui = {} -- заполняется в ensure_imgui()
 
 local function c4(r, g, b, a)
-  return imgui.ImVec4(r, g, b, a or 1)
+  -- plain color (x,y,z,w) — без imgui на старте; UI сам читает поля
+  return { x = r, y = g, z = b, w = a or 1 }
 end
 
 -- простые цветовые темы (без фоновых картинок)
@@ -744,6 +725,7 @@ local function read_char_buf(buf)
 end
 
 local function sync_ui_from_cfg()
+  if not imgui_ready or not ui.reports then return end
   ui.reports[0] = cfg.reports
   ui.forms[0] = cfg.forms
   ui.mentions[0] = cfg.mentions
@@ -763,6 +745,7 @@ local function sync_ui_from_cfg()
 end
 
 local function apply_ui_to_cfg()
+  if not imgui_ready or not ui.reports then return end
   cfg.reports = ui.reports[0]
   cfg.forms = ui.forms[0]
   cfg.mentions = ui.mentions[0]
@@ -1371,7 +1354,7 @@ local function help_send(text)
       help_save_tickets()
       help_state.status = 'отправлено'
       help_sel.idx = #help_tickets
-      write_char_buf(ui.help_text, 1024, '')
+      if ui.help_text then write_char_buf(ui.help_text, 1024, '') end
       chat('Заявка отправлена · ' .. ticket.id)
     else
       help_state.status = 'ошибка'
@@ -1571,12 +1554,14 @@ end
 
 local function copy_text(text)
   text = tostring(text or '')
+  if not imgui then return false end
   local ok = pcall(function() imgui.SetClipboardText(text) end)
   return ok
 end
 
 local function read_clipboard()
   local text = ''
+  if not imgui then return '' end
   pcall(function() text = imgui.GetClipboardText() or '' end)
   return tostring(text or '')
 end
@@ -1893,8 +1878,59 @@ local function format_clip_dur(sec)
 end
 
 local ui_frame_ready = false
+
+local function ensure_imgui()
+  if imgui_ready and imgui and menu_ui and ui.bot_token then return true end
+  local ok, err = pcall(function()
+    if not imgui then
+      imgui = require 'mimgui'
+    end
+    if not menu_ui then
+      package.loaded['arizona_tg_public_ui'] = nil
+      menu_ui = require 'arizona_tg_public_ui'
+    end
+    local was_open = showMenu and showMenu[0] or false
+    showMenu = imgui.new.bool(was_open and true or false)
+    ui.reports = imgui.new.bool(cfg.reports and true or false)
+    ui.forms = imgui.new.bool(cfg.forms and true or false)
+    ui.mentions = imgui.new.bool(cfg.mentions and true or false)
+    ui.watch_queue = imgui.new.bool(cfg.watch_queue and true or false)
+    ui.quiet_mode = imgui.new.bool(cfg.quiet_mode and true or false)
+    ui.queue_from = imgui.new.int(tonumber(cfg.queue_from) or 10)
+    ui.queue_afk_from = imgui.new.int(tonumber(cfg.queue_afk_from) or 5)
+    ui.afk_sec = imgui.new.int(tonumber(cfg.afk_sec) or 90)
+    ui.cooldown = imgui.new.int(tonumber(cfg.cooldown) or 3)
+    ui.send_clips = imgui.new.bool(cfg.clips and true or false)
+    ui.utils_radius = imgui.new.int(50)
+    ui.utils_cmd = imgui.new.char[96]()
+    ui.utils_note = imgui.new.char[128]()
+    ui.utils_pm = imgui.new.char[128]()
+    ui.events_rename = imgui.new.char[96]()
+    ui.events_add = imgui.new.char[96]()
+    ui.org_add = imgui.new.char[96]()
+    ui.bot_token = imgui.new.char[192]()
+    ui.chat_id = imgui.new.char[64]()
+    ui.help_text = imgui.new.char[1024]()
+    ui.win_w = imgui.new.int(tonumber(cfg.win_w) or 1000)
+    ui.win_h = imgui.new.int(tonumber(cfg.win_h) or 640)
+    if P then
+      P.imgui = imgui
+      P.ui = ui
+      P.showMenu = showMenu
+    end
+  end)
+  if not ok then
+    imgui_ready = false
+    chat('Меню не загрузилось (mimgui). Отключи MCR.luac и похожие. ' .. tostring(err))
+    return false
+  end
+  imgui_ready = true
+  return true
+end
+
 local function ensure_ui_frame()
   if ui_frame_ready then return true end
+  if not ensure_imgui() then return false end
   local ok = pcall(function()
     imgui.OnFrame(
       function()
@@ -1919,22 +1955,22 @@ local function open_menu(tab)
   if not ensure_ui_frame() then return end
   showMenu[0] = true
   sync_ui_from_cfg()
-  -- tab задан явно (например /anv) — иначе оставляем вкладку, на которой закрыли
   if tab ~= nil then
     menuTab = tonumber(tab) or menuTab or 1
   end
   if menuTab < 1 or menuTab > 8 then menuTab = 1 end
   if menuTab == 3 then sync_clips_ui() end
-  -- events_fetch вызывается из UI при входе на вкладки 6/7 (здесь local ещё недоступен)
-  if menu_ui.on_open then menu_ui.on_open() end
+  if menu_ui and menu_ui.on_open then menu_ui.on_open() end
 end
 
 local function toggle_menu()
-  local open = showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
+  local open = showMenu[0] or (menu_ui and menu_ui.is_visible and menu_ui.is_visible())
   if open then
-    apply_ui_to_cfg()
-    clips_set_enabled(ui.send_clips[0])
-    if menu_ui.request_close then menu_ui.request_close() end
+    if imgui_ready then
+      apply_ui_to_cfg()
+      if ui.send_clips then clips_set_enabled(ui.send_clips[0]) end
+      if menu_ui and menu_ui.request_close then menu_ui.request_close() end
+    end
     showMenu[0] = false
   else
     open_menu()
@@ -1942,6 +1978,10 @@ local function toggle_menu()
 end
 
 local function apply_menu_style()
+  if not imgui then return end
+  local function im4(col, a)
+    return imgui.ImVec4(col.x, col.y, col.z, a or col.w or 1)
+  end
   local s = imgui.GetStyle()
   s.WindowRounding = ROUND
   s.ChildRounding = 10
@@ -1956,27 +1996,27 @@ local function apply_menu_style()
   s.ChildBorderSize = 0
   s.FrameBorderSize = 0
   local c = s.Colors
-  c[imgui.Col.WindowBg] = imgui.ImVec4(C.panel.x, C.panel.y, C.panel.z, 0.02)
+  c[imgui.Col.WindowBg] = im4(C.panel, 0.02)
   c[imgui.Col.ChildBg] = imgui.ImVec4(0, 0, 0, 0)
-  c[imgui.Col.Border] = c4(C.line.x, C.line.y, C.line.z, 0.12)
-  c[imgui.Col.Button] = C.btn
-  c[imgui.Col.ButtonHovered] = C.btn_h
-  c[imgui.Col.ButtonActive] = C.accent2
-  c[imgui.Col.CheckMark] = C.accent
-  c[imgui.Col.SliderGrab] = C.accent
-  c[imgui.Col.SliderGrabActive] = C.accent2
+  c[imgui.Col.Border] = im4(C.line, 0.12)
+  c[imgui.Col.Button] = im4(C.btn)
+  c[imgui.Col.ButtonHovered] = im4(C.btn_h)
+  c[imgui.Col.ButtonActive] = im4(C.accent2)
+  c[imgui.Col.CheckMark] = im4(C.accent)
+  c[imgui.Col.SliderGrab] = im4(C.accent)
+  c[imgui.Col.SliderGrabActive] = im4(C.accent2)
   if C.light then
-    c[imgui.Col.FrameBg] = c4(0.90, 0.90, 0.88, 0.40)
-    c[imgui.Col.FrameBgHovered] = c4(0.84, 0.84, 0.82, 0.55)
-    c[imgui.Col.FrameBgActive] = c4(0.78, 0.78, 0.76, 0.65)
+    c[imgui.Col.FrameBg] = imgui.ImVec4(0.90, 0.90, 0.88, 0.40)
+    c[imgui.Col.FrameBgHovered] = imgui.ImVec4(0.84, 0.84, 0.82, 0.55)
+    c[imgui.Col.FrameBgActive] = imgui.ImVec4(0.78, 0.78, 0.76, 0.65)
   else
-    c[imgui.Col.FrameBg] = c4(C.btn.x, C.btn.y, C.btn.z, 0.32)
-    c[imgui.Col.FrameBgHovered] = c4(C.btn_h.x, C.btn_h.y, C.btn_h.z, 0.45)
-    c[imgui.Col.FrameBgActive] = c4(C.accent2.x, C.accent2.y, C.accent2.z, 0.55)
+    c[imgui.Col.FrameBg] = im4(C.btn, 0.32)
+    c[imgui.Col.FrameBgHovered] = im4(C.btn_h, 0.45)
+    c[imgui.Col.FrameBgActive] = im4(C.accent2, 0.55)
   end
-  c[imgui.Col.Text] = C.soft
-  c[imgui.Col.TextDisabled] = C.muted
-  c[imgui.Col.Separator] = C.line
+  c[imgui.Col.Text] = im4(C.soft)
+  c[imgui.Col.TextDisabled] = im4(C.muted)
+  c[imgui.Col.Separator] = im4(C.line)
 end
 
 local function send_queue_now()
@@ -2903,7 +2943,7 @@ P.read_char_buf = read_char_buf
 
 addEventHandler('onWindowMessage', function(msg, wparam, lparam)
   -- клики/клавиши в открытом меню не сбрасывают AFK/online
-  local menu_open = showMenu[0]
+  local menu_open = showMenu and showMenu[0]
   if not menu_open then
     if msg == WM_KEYDOWN or msg == WM_SYSKEYDOWN
       or msg == WM_LBUTTONDOWN or msg == WM_RBUTTONDOWN
@@ -2915,15 +2955,15 @@ addEventHandler('onWindowMessage', function(msg, wparam, lparam)
   if msg == WM_KEYDOWN or msg == WM_SYSKEYDOWN then
     if isSampAvailable() and sampIsChatInputActive() then return end
     if wparam == VK_DELETE or wparam == VK_DECIMAL then
-      local open = showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
+      local open = showMenu[0] or (menu_ui and menu_ui.is_visible and menu_ui.is_visible())
       if open then toggle_menu() else open_menu() end
       return
     end
     -- Esc закрывает сразу, без паузы игры
-    if wparam == VK_ESCAPE and (showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())) then
+    if wparam == VK_ESCAPE and (showMenu[0] or (menu_ui and menu_ui.is_visible and menu_ui.is_visible())) then
       apply_ui_to_cfg()
-      clips_set_enabled(ui.send_clips[0])
-      if menu_ui.request_close then menu_ui.request_close() end
+      if ui.send_clips then clips_set_enabled(ui.send_clips[0]) end
+      if menu_ui and menu_ui.request_close then menu_ui.request_close() end
       showMenu[0] = false
       pcall(consumeWindowMessage, true, true)
       return
@@ -2938,7 +2978,7 @@ function main()
       while not isSampAvailable() do wait(100) end
       chat('Public: открой /tgpub → Настройки → впиши Bot Token и Chat ID')
     end
-    sync_ui_from_cfg()
+    -- sync_ui_from_cfg только после ensure_imgui (открытие меню)
     pcall(load_state)
     pcall(function() helpmod.help_load_tickets() end)
     pcall(function() helpmod.help_ensure_client_id() end)

@@ -4,8 +4,16 @@
 
 local M = {}
 
-local blur_ok, blur = pcall(require, 'mimgui_blur')
-if not blur_ok then blur = nil end
+-- mimgui_blur — лениво (при первом draw), иначе require вместе с MCR валит клиент
+local blur = nil
+local blur_tried = false
+local function ensure_blur()
+  if blur_tried then return blur end
+  blur_tried = true
+  local ok, mod = pcall(require, 'mimgui_blur')
+  if ok then blur = mod end
+  return blur
+end
 
 local anim = {
   toggles = {},
@@ -724,8 +732,9 @@ local function draw_chrome(P, alpha)
   -- мягкая внешняя тень окна
   soft_shadow(dl, imgui, a, b, ROUND, 1.0 * alpha)
 
-  if blur then
-    pcall(blur.applyRect, dl, a, b, 2.4, u32(imgui, P.c4(1, 1, 1, 1)), ROUND, corners)
+  local blur_mod = ensure_blur()
+  if blur_mod then
+    pcall(blur_mod.applyRect, dl, a, b, 2.4, u32(imgui, P.c4(1, 1, 1, 1)), ROUND, corners)
   end
 
   -- лёгкое стекло поверх фона темы (не закрашивать наглухо!)
