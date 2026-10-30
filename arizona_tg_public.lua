@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.11-public')
+script_version('1.0.12-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.11-public'
+local SCRIPT_VERSION = '1.0.12-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -1845,24 +1845,26 @@ local function notify_admin_form(cmd, tag)
 end
 
 function sampev.onServerMessage(color, text)
-  handle_chat(text)
+  pcall(handle_chat, text)
 end
 
 function sampev.onSendChat(message)
-  touch_activity()
+  pcall(touch_activity)
 end
 
 function sampev.onSendCommand(command)
-  touch_activity()
-  last_outgoing_cmd = tostring(command or '')
-  if not cfg.forms then return end
-  local cmd = last_outgoing_cmd:match('^/(%S+)') or last_outgoing_cmd:match('^(%S+)')
-  if not cmd then return end
-  cmd = cmd:lower()
-  if form_cmds[cmd] then
-    local tag = last_outgoing_cmd:match('//%s*(.+)$') or ''
-    notify_admin_form('/' .. cmd, trim(tag))
-  end
+  pcall(function()
+    touch_activity()
+    last_outgoing_cmd = tostring(command or '')
+    if not cfg.forms then return end
+    local cmd = last_outgoing_cmd:match('^/(%S+)') or last_outgoing_cmd:match('^(%S+)')
+    if not cmd then return end
+    cmd = cmd:lower()
+    if form_cmds[cmd] then
+      local tag = last_outgoing_cmd:match('//%s*(.+)$') or ''
+      notify_admin_form('/' .. cmd, trim(tag))
+    end
+  end)
 end
 
 local function read_tools_info()
@@ -2183,11 +2185,14 @@ local function fmt_org_money(n)
   return tostring(math.floor(n))
 end
 
-local function events_apply_csv(raw)
+local function events_apply_csv(raw, yieldable)
   raw = tostring(raw or '')
   local today = events_today_str()
   local done, today_list, rows = {}, {}, {}
+  local nline = 0
   for line in raw:gmatch('[^\r\n]+') do
+    nline = nline + 1
+    if yieldable and (nline % 100 == 0) then wait(0) end
     if not line:match('^Дата') and trim(line) ~= '' and not line:match('^,+') then
       local f = parse_csv_line(line)
       local dt = trim(f[1] or '')
@@ -2327,7 +2332,7 @@ local function events_fetch(force)
     if not body then
       local cached = read_file(EVENTS_CACHE)
       if cached and cached ~= '' then
-        events_apply_csv(cached)
+        events_apply_csv(cached, true)
         events_state.status = 'ok'
         events_state.err = 'кэш (HTTP ' .. tostring(last_code) .. ')'
         chat('МП: не обновилось, показан кэш')
@@ -2340,7 +2345,7 @@ local function events_fetch(force)
     end
     ensure_dirs()
     write_file(EVENTS_CACHE, body)
-    events_apply_csv(body)
+    events_apply_csv(body, true)
     events_state.err = ''
     local n = 0
     for _ in pairs(events_state.done) do n = n + 1 end
@@ -3054,52 +3059,35 @@ function main()
     pcall(function() helpmod.help_ensure_client_id() end)
     local nforms = 0
     pcall(function() nforms = load_form_cmds() or 0 end)
-    do
+    -- CSV кэш — в фоне с yield, не на старте main (иначе микрофриз/краш с другими скриптами)
+    lua_thread.create(function()
+      wait(3000)
       local cached = read_file(EVENTS_CACHE)
       if cached and cached ~= '' then
         pcall(function()
-          Ev.events_apply_csv(cached)
+          Ev.events_apply_csv(cached, true)
           events_state.err = 'кэш'
         end)
       end
-    end
+    end)
     touch_activity()
     while not isSampAvailable() do wait(100) end
-    -- дать SAMP/чату стабилизироваться (ранний sampAddChatMessage иногда валит клиент)
-    wait(1500)
+    wait(2000)
     pcall(function()
       chat(string.format(
-        'TG Public %s | Numpad Del /tgpub | /tgpubstatus | форм: %d',
-        SCRIPT_VERSION, nforms
+        'TG Public %s | Del /tgpub | /tgpubstatus | /tgptest',
+        SCRIPT_VERSION
       ))
     end)
     if _G.__TGPUB_NEED_RESTART then
       pcall(function()
-        chat('Обновление уже на диске — полностью закрой GTA и зайди снова')
+        chat('Обновление на диске — полностью закрой GTA и зайди снова')
       end)
       _G.__TGPUB_NEED_RESTART = nil
     end
 
-    -- МП/update/help — позже и мягко (requests блокирует клиент)
-    lua_thread.create(function()
-      wait(25000)
-      pcall(function() Ev.events_fetch(false) end)
-      while true do
-        wait(300000)
-        pcall(function() Ev.events_fetch(true) end)
-      end
-    end)
-    lua_thread.create(function()
-      wait(35000)
-      pcall(function() extras.update_check(false, true) end)
-    end)
-    lua_thread.create(function()
-      wait(40000)
-      while true do
-        pcall(function() helpmod.help_poll_replies(false) end)
-        wait(45000)
-      end
-    end)
+    -- БЕЗ авто HTTP при старте (requests блокирует весь клиент → краш с Helper/ArzMarket).
+    -- МП/update/help только вручную: Обновить в меню, /tgpubupdate, вкладка Помощь.
 
     pcall(sampRegisterChatCommand, 'tgpub', function()
       pcall(toggle_menu)
@@ -3110,13 +3098,14 @@ function main()
         local f = io.open(p, 'rb'); if f then f:close(); return true end; return false
       end
       chat(string.format(
-        'Public %s | token:%s chat:%s | ipc:%s ui:%s | imgui:%s | MCR-off для меню',
+        'Public %s | token:%s chat:%s | lib ipc:%s ui:%s | menu:%s | forms:%d',
         SCRIPT_VERSION,
         (cfg.token ~= '' and 'ok' or 'нет'),
         (cfg.chat_id ~= '' and 'ok' or 'нет'),
         ex(wd .. '\\lib\\arizona_ipc_public.lua') and 'ok' or 'НЕТ',
         ex(wd .. '\\lib\\arizona_tg_public_ui.lua') and 'ok' or 'НЕТ',
-        imgui_ready and 'ok' or 'ещё нет'
+        imgui_ready and 'ok' or 'закрыто',
+        nforms
       ))
     end)
     pcall(sampRegisterChatCommand, 'tgpubupdate', function()
