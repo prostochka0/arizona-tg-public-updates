@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.4-public')
+script_version('1.0.5-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.4-public'
+local SCRIPT_VERSION = '1.0.5-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -1953,6 +1953,7 @@ local function parse_csv_line(line)
   return fields
 end
 
+local Ev = (function()
 local function events_today_str()
   return os.date('%d.%m.%Y')
 end
@@ -2692,7 +2693,36 @@ local function events_reset_orgs()
   org_hidden = {}
   save_state()
   return true
-end
+end
+  return {
+    events_today_str = events_today_str,
+    fmt_org_money = fmt_org_money,
+    events_apply_csv = events_apply_csv,
+    events_fetch = events_fetch,
+    events_has_rec = events_has_rec,
+    events_get_list = events_get_list,
+    events_add_rec = events_add_rec,
+    events_add_from_buf = events_add_from_buf,
+    events_hide_rec = events_hide_rec,
+    events_reset_hidden = events_reset_hidden,
+    events_begin_rename = events_begin_rename,
+    events_apply_rename = events_apply_rename,
+    events_cancel_rename = events_cancel_rename,
+    events_get_rename_key = events_get_rename_key,
+    events_get_state = events_get_state,
+    events_get_orgs = events_get_orgs,
+    events_get_helpers = events_get_helpers,
+    events_hide_helper = events_hide_helper,
+    events_reset_helpers = events_reset_helpers,
+    events_get_helpers_stats = events_get_helpers_stats,
+    events_add_org = events_add_org,
+    events_add_org_from_buf = events_add_org_from_buf,
+    events_get_orgs_stats = events_get_orgs_stats,
+    events_hide_org = events_hide_org,
+    events_reset_orgs = events_reset_orgs,
+  }
+end)()
+
 
 local P = {
   imgui = imgui, bit = bit, cfg = cfg, ui = ui, C = C, c4 = c4,
@@ -2758,29 +2788,29 @@ P.save_note_for_sel = save_note_for_sel
 P.get_note_for = function(id)
   return utils_notes[tostring(id)] or ''
 end
-P.events_fetch = events_fetch
-P.events_get_list = events_get_list
-P.events_get_state = events_get_state
-P.events_hide_rec = events_hide_rec
-P.events_reset_hidden = events_reset_hidden
-P.events_add_rec = events_add_rec
-P.events_add_from_buf = events_add_from_buf
-P.events_has_rec = events_has_rec
-P.events_get_orgs = events_get_orgs
-P.events_get_orgs_stats = events_get_orgs_stats
-P.events_hide_org = events_hide_org
-P.events_reset_orgs = events_reset_orgs
-P.events_get_helpers = events_get_helpers
-P.events_get_helpers_stats = events_get_helpers_stats
-P.events_hide_helper = events_hide_helper
-P.events_reset_helpers = events_reset_helpers
-P.events_add_org = events_add_org
-P.events_add_org_from_buf = events_add_org_from_buf
-P.fmt_org_money = fmt_org_money
-P.events_begin_rename = events_begin_rename
-P.events_apply_rename = events_apply_rename
-P.events_cancel_rename = events_cancel_rename
-P.events_get_rename_key = events_get_rename_key
+P.events_fetch = Ev.events_fetch
+P.events_get_list = Ev.events_get_list
+P.events_get_state = Ev.events_get_state
+P.events_hide_rec = Ev.events_hide_rec
+P.events_reset_hidden = Ev.events_reset_hidden
+P.events_add_rec = Ev.events_add_rec
+P.events_add_from_buf = Ev.events_add_from_buf
+P.events_has_rec = Ev.events_has_rec
+P.events_get_orgs = Ev.events_get_orgs
+P.events_get_orgs_stats = Ev.events_get_orgs_stats
+P.events_hide_org = Ev.events_hide_org
+P.events_reset_orgs = Ev.events_reset_orgs
+P.events_get_helpers = Ev.events_get_helpers
+P.events_get_helpers_stats = Ev.events_get_helpers_stats
+P.events_hide_helper = Ev.events_hide_helper
+P.events_reset_helpers = Ev.events_reset_helpers
+P.events_add_org = Ev.events_add_org
+P.events_add_org_from_buf = Ev.events_add_org_from_buf
+P.fmt_org_money = Ev.fmt_org_money
+P.events_begin_rename = Ev.events_begin_rename
+P.events_apply_rename = Ev.events_apply_rename
+P.events_cancel_rename = Ev.events_cancel_rename
+P.events_get_rename_key = Ev.events_get_rename_key
 P.SCRIPT_VERSION = SCRIPT_VERSION
 P.update_check = extras.update_check
 P.get_update_state = extras.get_update_state
@@ -2846,7 +2876,7 @@ function main()
   do
     local cached = read_file(EVENTS_CACHE)
     if cached and cached ~= '' then
-      events_apply_csv(cached)
+      Ev.events_apply_csv(cached)
       events_state.err = 'кэш'
     end
   end
@@ -2856,7 +2886,7 @@ function main()
     'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
     SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
   ))
-  events_fetch(true)
+  Ev.events_fetch(true)
   -- тихое автообновление через несколько секунд после входа
   lua_thread.create(function()
     wait(8000)
