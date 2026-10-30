@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.5-public')
+script_version('1.0.6-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.5-public'
+local SCRIPT_VERSION = '1.0.6-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -60,10 +60,24 @@ package.loaded['arizona_tg_public_ui'] = nil
 local menu_ui = require 'arizona_tg_public_ui'
 
 local ffi = require 'ffi'
-pcall(ffi.cdef, [[unsigned long GetTickCount(void);]])
-local kernel32 = ffi.load('kernel32')
+local _get_tick = nil
+do
+  local ok_cdef = pcall(ffi.cdef, [[unsigned long GetTickCount(void);]])
+  local ok_k32, k32 = pcall(ffi.load, 'kernel32')
+  if ok_cdef and ok_k32 and k32 and k32.GetTickCount then
+    _get_tick = function()
+      local ok, v = pcall(k32.GetTickCount)
+      if ok then return tonumber(v) or 0 end
+      return math.floor(os.clock() * 1000)
+    end
+  else
+    _get_tick = function()
+      return math.floor(os.clock() * 1000)
+    end
+  end
+end
 local function ticks()
-  return tonumber(kernel32.GetTickCount())
+  return _get_tick()
 end
 
 local ROOT = getWorkingDirectory()
@@ -585,11 +599,17 @@ local function update_apply_manifest(manifest, silent)
   end
 
   update_state.status = 'ready'
-  update_state.msg = 'установлено ' .. ver .. ' · reload'
-  chat('TG Public обновлён до ' .. ver)
-  wait(400)
-  pcall(function()
-    thisScript():reload()
+  update_state.msg = 'установлено ' .. ver .. ' · перезапуск'
+  chat('TG Public обновлён до ' .. ver .. ' · перезагрузка через 2с')
+  -- отложенный reload: мгновенный thisScript():reload() после записи файла
+  -- у части клиентов роняет весь процесс GTA
+  lua_thread.create(function()
+    wait(2000)
+    pcall(function()
+      if thisScript and thisScript() and thisScript().reload then
+        thisScript():reload()
+      end
+    end)
   end)
   return true
 end
@@ -640,14 +660,22 @@ end
 local function get_update_state()
   return update_state
 end
-
-  return {
-    update_check = update_check,
-    get_update_state = get_update_state,
-    update_configured = update_configured,
-    http_get_raw = http_get_raw,
-    ensure_parent_dir = ensure_parent_dir,
-  }
+
+
+  return {
+
+    update_check = update_check,
+
+    get_update_state = get_update_state,
+
+    update_configured = update_configured,
+
+    http_get_raw = http_get_raw,
+
+    ensure_parent_dir = ensure_parent_dir,
+
+  }
+
 end)()
 local function append_event(ev)
   ensure_dirs()
@@ -1195,8 +1223,10 @@ local function get_self_info()
   return info
 end
 
--- ===================== HELP (public → admin) =====================
-local helpmod = (function()
+-- ===================== HELP (public → admin) =====================
+
+local helpmod = (function()
+
 local help_tickets = {}
 local help_state = {
   busy = false,
@@ -1429,19 +1459,32 @@ local function help_poll_replies(force)
     help_state.busy = false
   end)
 end
-
-  return {
-    help_configured = help_configured,
-    help_send = help_send,
-    help_poll_replies = help_poll_replies,
-    help_get_tickets = help_get_tickets,
-    help_get_state = help_get_state,
-    help_get_sel = help_get_sel,
-    help_set_sel = help_set_sel,
-    help_load_tickets = help_load_tickets,
-    help_ensure_client_id = help_ensure_client_id,
-  }
-end)()
+
+
+  return {
+
+    help_configured = help_configured,
+
+    help_send = help_send,
+
+    help_poll_replies = help_poll_replies,
+
+    help_get_tickets = help_get_tickets,
+
+    help_get_state = help_get_state,
+
+    help_get_sel = help_get_sel,
+
+    help_set_sel = help_set_sel,
+
+    help_load_tickets = help_load_tickets,
+
+    help_ensure_client_id = help_ensure_client_id,
+
+  }
+
+end)()
+
 local function get_nearby_players(radius, limit)
   radius = tonumber(radius) or 50
   limit = tonumber(limit) or 28
@@ -1953,7 +1996,8 @@ local function parse_csv_line(line)
   return fields
 end
 
-local Ev = (function()
+local Ev = (function()
+
 local function events_today_str()
   return os.date('%d.%m.%Y')
 end
@@ -2693,8 +2737,10 @@ local function events_reset_orgs()
   org_hidden = {}
   save_state()
   return true
-end
-  return {
+end
+
+  return {
+
     events_today_str = events_today_str,
     fmt_org_money = fmt_org_money,
     events_apply_csv = events_apply_csv,
@@ -2719,9 +2765,12 @@ end
     events_add_org_from_buf = events_add_org_from_buf,
     events_get_orgs_stats = events_get_orgs_stats,
     events_hide_org = events_hide_org,
-    events_reset_orgs = events_reset_orgs,
-  }
-end)()
+    events_reset_orgs = events_reset_orgs,
+
+  }
+
+end)()
+
 
 
 local P = {
@@ -2827,9 +2876,14 @@ P.read_char_buf = read_char_buf
 
 imgui.OnFrame(
   function()
-    return P.showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
+    local ok, vis = pcall(function()
+      return P.showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
+    end)
+    return ok and vis
   end,
-  function(player) menu_ui.draw(P, player) end
+  function(player)
+    pcall(function() menu_ui.draw(P, player) end)
+  end
 )
 
 addEventHandler('onWindowMessage', function(msg, wparam, lparam)
@@ -2863,76 +2917,97 @@ addEventHandler('onWindowMessage', function(msg, wparam, lparam)
 end)
 
 function main()
-  ensure_dirs()
-  if not load_ini() then
-    while not isSampAvailable() do wait(100) end
-    chat('Public: открой /tgpub → Настройки → впиши Bot Token и Chat ID')
-  end
-  sync_ui_from_cfg()
-  load_state()
-  helpmod.help_load_tickets()
-  helpmod.help_ensure_client_id()
-  local nforms = load_form_cmds()
-  do
-    local cached = read_file(EVENTS_CACHE)
-    if cached and cached ~= '' then
-      Ev.events_apply_csv(cached)
-      events_state.err = 'кэш'
+  local ok_main, err_main = pcall(function()
+    ensure_dirs()
+    if not load_ini() then
+      while not isSampAvailable() do wait(100) end
+      chat('Public: открой /tgpub → Настройки → впиши Bot Token и Chat ID')
     end
-  end
-  touch_activity()
-  while not isSampAvailable() do wait(100) end
-  chat(string.format(
-    'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
-    SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
-  ))
-  Ev.events_fetch(true)
-  -- тихое автообновление через несколько секунд после входа
-  lua_thread.create(function()
-    wait(8000)
-    extras.update_check(false, true)
-  end)
-  lua_thread.create(function()
-    wait(12000)
-    while true do
-      helpmod.help_poll_replies(false)
-      wait(30000)
-    end
-  end)
-
-  pcall(sampRegisterChatCommand, 'tgpub', function() toggle_menu() end)
-  pcall(sampRegisterChatCommand, 'tgpubupdate', function()
-    extras.update_check(true, false)
-  end)
-  pcall(sampRegisterChatCommand, 'tgptest', function()
-    notify('test', cp('Arizona Public · Тест\nЕсли видите это — ваш бот работает.'), {})
-    chat('Тест отправлен в ваш Telegram')
-  end)
-  pcall(sampRegisterChatCommand, 'tgpubqueue', function()
-    local q = read_tools_queue() or last_queue
-    if q == nil then chat('Очередь пока неизвестна'); return end
-    chat(string.format('Очередь: %s | AFK: %s (%dс)', tostring(q), is_afk() and 'да' or 'нет', inactive_sec()))
-    local prev = cfg.quiet_mode; cfg.quiet_mode = false
-    notify('queue', cp('Arizona Public · Репорты в очереди: ') .. tostring(q), { queue = q })
-    cfg.quiet_mode = prev
-  end)
-  pcall(sampRegisterChatCommand, 'tgpubreload', function()
-    local ok = load_ini()
-    local n = load_form_cmds()
     sync_ui_from_cfg()
-    chat(ok and ('Конфиг перечитан, форм: ' .. n) or ('Нет токена в Настройках, форм: ' .. n))
-  end)
-
-  while true do
-    wait(2000)
-    if cfg.watch_queue or cfg.reports then
-      local q = read_tools_queue()
-      if q ~= nil then
-        if q ~= last_queue then last_queue = q; save_state() end
-        consider_queue(q)
-      elseif last_queue ~= nil then
-        consider_queue(last_queue)
+    pcall(load_state)
+    pcall(function() helpmod.help_load_tickets() end)
+    pcall(function() helpmod.help_ensure_client_id() end)
+    local nforms = 0
+    pcall(function() nforms = load_form_cmds() or 0 end)
+    do
+      local cached = read_file(EVENTS_CACHE)
+      if cached and cached ~= '' then
+        pcall(function()
+          Ev.events_apply_csv(cached)
+          events_state.err = 'кэш'
+        end)
       end
     end
+    touch_activity()
+    while not isSampAvailable() do wait(100) end
+    chat(string.format(
+      'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
+      SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
+    ))
+
+    -- МП/update/help — только после входа, в отдельных потоках (не блокируем main)
+    lua_thread.create(function()
+      wait(2500)
+      pcall(function() Ev.events_fetch(true) end)
+    end)
+    lua_thread.create(function()
+      wait(10000)
+      pcall(function() extras.update_check(false, true) end)
+    end)
+    lua_thread.create(function()
+      wait(15000)
+      while true do
+        pcall(function() helpmod.help_poll_replies(false) end)
+        wait(30000)
+      end
+    end)
+
+    pcall(sampRegisterChatCommand, 'tgpub', function()
+      pcall(toggle_menu)
+    end)
+    pcall(sampRegisterChatCommand, 'tgpubupdate', function()
+      pcall(function() extras.update_check(true, false) end)
+    end)
+    pcall(sampRegisterChatCommand, 'tgptest', function()
+      notify('test', cp('Arizona Public · Тест\nЕсли видите это — ваш бот работает.'), {})
+      chat('Тест отправлен в ваш Telegram')
+    end)
+    pcall(sampRegisterChatCommand, 'tgpubqueue', function()
+      local q = read_tools_queue() or last_queue
+      if q == nil then chat('Очередь пока неизвестна'); return end
+      chat(string.format('Очередь: %s | AFK: %s (%dс)', tostring(q), is_afk() and 'да' or 'нет', inactive_sec()))
+      local prev = cfg.quiet_mode; cfg.quiet_mode = false
+      notify('queue', cp('Arizona Public · Репорты в очереди: ') .. tostring(q), { queue = q })
+      cfg.quiet_mode = prev
+    end)
+    pcall(sampRegisterChatCommand, 'tgpubreload', function()
+      local ok = load_ini()
+      local n = load_form_cmds()
+      sync_ui_from_cfg()
+      chat(ok and ('Конфиг перечитан, форм: ' .. n) or ('Нет токена в Настройках, форм: ' .. n))
+    end)
+
+    while true do
+      wait(2000)
+      pcall(function()
+        if cfg.watch_queue or cfg.reports then
+          local q = read_tools_queue()
+          if q ~= nil then
+            if q ~= last_queue then last_queue = q; save_state() end
+            consider_queue(q)
+          elseif last_queue ~= nil then
+            consider_queue(last_queue)
+          end
+        end
+      end)
+    end
+  end)
+  if not ok_main then
+    pcall(function()
+      if isSampAvailable() then
+        sampAddChatMessage('{FF5555}[TG Public] crash: {FFFFFF}' .. tostring(err_main), -1)
+      end
+    end)
+    while true do wait(10000) end
   end
 end
