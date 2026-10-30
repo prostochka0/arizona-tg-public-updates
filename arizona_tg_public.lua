@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.6-public')
+script_version('1.0.7-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.6-public'
+local SCRIPT_VERSION = '1.0.7-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -129,6 +129,7 @@ local last_report_push = { queue = nil, reason = nil, at = 0 }
 local showMenu = imgui.new.bool(false)
 local styleReady = false
 local menuTab = 1
+local P -- forward decl: нужен OnFrame до полного заполнения таблицы
 local utils_sel_id = -1
 local utils_favs = { '/admins', '/re', '/time', '/leaders' }
 local utils_hist = {}
@@ -1891,7 +1892,31 @@ local function format_clip_dur(sec)
   return string.format('%02d:%02d', math.floor(sec / 60), sec % 60)
 end
 
+local ui_frame_ready = false
+local function ensure_ui_frame()
+  if ui_frame_ready then return true end
+  local ok = pcall(function()
+    imgui.OnFrame(
+      function()
+        local vok, vis = pcall(function()
+          return P.showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
+        end)
+        return vok and vis
+      end,
+      function(player)
+        pcall(function() menu_ui.draw(P, player) end)
+      end
+    )
+  end)
+  ui_frame_ready = ok and true or false
+  if not ok then
+    chat('Меню: конфликт mimgui (отключи MCR/другие imgui-скрипты)')
+  end
+  return ui_frame_ready
+end
+
 local function open_menu(tab)
+  if not ensure_ui_frame() then return end
   showMenu[0] = true
   sync_ui_from_cfg()
   -- tab задан явно (например /anv) — иначе оставляем вкладку, на которой закрыли
@@ -2773,7 +2798,7 @@ end)()
 
 
 
-local P = {
+P = {
   imgui = imgui, bit = bit, cfg = cfg, ui = ui, C = C, c4 = c4,
   showMenu = showMenu, THEMES = THEMES, ipc = ipc,
   WIN_W = WIN_W, WIN_H = WIN_H, SIDE_W = SIDE_W, ROUND = ROUND,
@@ -2873,18 +2898,8 @@ P.help_get_sel = helpmod.help_get_sel
 P.help_set_sel = helpmod.help_set_sel
 P.help_load_tickets = helpmod.help_load_tickets
 P.read_char_buf = read_char_buf
-
-imgui.OnFrame(
-  function()
-    local ok, vis = pcall(function()
-      return P.showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
-    end)
-    return ok and vis
-  end,
-  function(player)
-    pcall(function() menu_ui.draw(P, player) end)
-  end
-)
+-- imgui.OnFrame регистрируется лениво в ensure_ui_frame() — иначе конфликт с MCR/другими
+-- mimgui-скриптами роняет GTA сразу после post-load hooks
 
 addEventHandler('onWindowMessage', function(msg, wparam, lparam)
   -- клики/клавиши в открытом меню не сбрасывают AFK/online
@@ -2940,22 +2955,26 @@ function main()
     end
     touch_activity()
     while not isSampAvailable() do wait(100) end
-    chat(string.format(
-      'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
-      SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
-    ))
+    -- дать SAMP/чату стабилизироваться (ранний sampAddChatMessage иногда валит клиент)
+    wait(1500)
+    pcall(function()
+      chat(string.format(
+        'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
+        SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
+      ))
+    end)
 
     -- МП/update/help — только после входа, в отдельных потоках (не блокируем main)
     lua_thread.create(function()
-      wait(2500)
+      wait(5000)
       pcall(function() Ev.events_fetch(true) end)
     end)
     lua_thread.create(function()
-      wait(10000)
+      wait(20000)
       pcall(function() extras.update_check(false, true) end)
     end)
     lua_thread.create(function()
-      wait(15000)
+      wait(25000)
       while true do
         pcall(function() helpmod.help_poll_replies(false) end)
         wait(30000)
