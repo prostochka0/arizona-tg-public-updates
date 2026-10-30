@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.10-public')
+script_version('1.0.11-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.10-public'
+local SCRIPT_VERSION = '1.0.11-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -71,7 +71,7 @@ do
     function main() wait(-1) end
     return
   end
-  -- Стадийное обновление: файлы из _tgpub_next копируем при старте, без reload() в бою
+  -- Стадийное обновление: копируем на диск, БЕЗ reload (reload = краш). Нужен полный перезаход.
   local next_dir = wd .. '\\_tgpub_next'
   local next_main = next_dir .. '\\arizona_tg_public.lua'
   if exists(next_main) then
@@ -89,14 +89,22 @@ do
       end
     end
     pcall(os.remove, next_dir .. '\\version.json')
-    print('[Arizona TG Public] Обновление из _tgpub_next применено — перезагрузка скрипта')
+    print('[Arizona TG Public] Обновление записано на диск. ПОЛНОСТЬЮ закрой GTA и зайди снова.')
+    _G.__TGPUB_NEED_RESTART = true
+    -- не return / не reload — доигрываем текущую сессию, новая версия со следующего входа
+  end
+
+  -- проверка lib до require (частая ошибка установки)
+  local miss = {}
+  if not exists(wd .. '\\lib\\arizona_ipc_public.lua') then miss[#miss + 1] = 'lib/arizona_ipc_public.lua' end
+  if not exists(wd .. '\\lib\\arizona_tg_public_ui.lua') then miss[#miss + 1] = 'lib/arizona_tg_public_ui.lua' end
+  if #miss > 0 then
+    print('[Arizona TG Public] НЕТ ФАЙЛОВ: ' .. table.concat(miss, ', '))
+    print('[Arizona TG Public] Скопируй из РАЗДАТЬ_arizona_tg_public целиком (lua + lib\\).')
     function main()
-      wait(50)
-      pcall(function()
-        if thisScript and thisScript() and thisScript().reload then
-          thisScript():reload()
-        end
-      end)
+      while not isSampAvailable() do wait(100) end
+      wait(1500)
+      pcall(sampAddChatMessage, '{FF5555}[TG Public] Нет lib-файлов. Скопируй lib\\ из раздачи.', -1)
       wait(-1)
     end
     return
@@ -113,7 +121,17 @@ end
 local sampev = require 'lib.samp.events'
 local requests = require 'requests'
 local json = require 'cjson.safe'
-local ipc = require 'arizona_ipc_public'
+local ok_ipc, ipc = pcall(require, 'arizona_ipc_public')
+if not ok_ipc then
+  print('[Arizona TG Public] require arizona_ipc_public FAIL: ' .. tostring(ipc))
+  function main()
+    while not isSampAvailable() do wait(100) end
+    wait(1500)
+    pcall(sampAddChatMessage, '{FF5555}[TG Public] Не загрузился arizona_ipc_public (см. moonloader.log)', -1)
+    wait(-1)
+  end
+  return
+end
 local bit = require 'bit'
 -- mimgui + UI подключаются ЛЕНИВО (ensure_imgui): при старте вместе с MCR/AdminMP
 -- require mimgui часто роняет весь клиент GTA без Lua-ошибки в логе
@@ -3051,30 +3069,55 @@ function main()
     wait(1500)
     pcall(function()
       chat(string.format(
-        'TG Public %s | Numpad Del /tgpub | Space МП | >=%d / >=%d+AFK | форм: %d',
-        SCRIPT_VERSION, cfg.queue_from, cfg.queue_afk_from, nforms
+        'TG Public %s | Numpad Del /tgpub | /tgpubstatus | форм: %d',
+        SCRIPT_VERSION, nforms
       ))
     end)
+    if _G.__TGPUB_NEED_RESTART then
+      pcall(function()
+        chat('Обновление уже на диске — полностью закрой GTA и зайди снова')
+      end)
+      _G.__TGPUB_NEED_RESTART = nil
+    end
 
-    -- МП/update/help — только после входа, в отдельных потоках (не блокируем main)
+    -- МП/update/help — позже и мягко (requests блокирует клиент)
     lua_thread.create(function()
-      wait(5000)
-      pcall(function() Ev.events_fetch(true) end)
+      wait(25000)
+      pcall(function() Ev.events_fetch(false) end)
+      while true do
+        wait(300000)
+        pcall(function() Ev.events_fetch(true) end)
+      end
     end)
     lua_thread.create(function()
-      wait(20000)
+      wait(35000)
       pcall(function() extras.update_check(false, true) end)
     end)
     lua_thread.create(function()
-      wait(25000)
+      wait(40000)
       while true do
         pcall(function() helpmod.help_poll_replies(false) end)
-        wait(30000)
+        wait(45000)
       end
     end)
 
     pcall(sampRegisterChatCommand, 'tgpub', function()
       pcall(toggle_menu)
+    end)
+    pcall(sampRegisterChatCommand, 'tgpubstatus', function()
+      local wd = getWorkingDirectory()
+      local function ex(p)
+        local f = io.open(p, 'rb'); if f then f:close(); return true end; return false
+      end
+      chat(string.format(
+        'Public %s | token:%s chat:%s | ipc:%s ui:%s | imgui:%s | MCR-off для меню',
+        SCRIPT_VERSION,
+        (cfg.token ~= '' and 'ok' or 'нет'),
+        (cfg.chat_id ~= '' and 'ok' or 'нет'),
+        ex(wd .. '\\lib\\arizona_ipc_public.lua') and 'ok' or 'НЕТ',
+        ex(wd .. '\\lib\\arizona_tg_public_ui.lua') and 'ok' or 'НЕТ',
+        imgui_ready and 'ok' or 'ещё нет'
+      ))
     end)
     pcall(sampRegisterChatCommand, 'tgpubupdate', function()
       pcall(function() extras.update_check(true, false) end)
