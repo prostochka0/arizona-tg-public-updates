@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.3-public')
+script_version('1.0.4-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.3-public'
+local SCRIPT_VERSION = '1.0.4-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -640,7 +640,15 @@ end
 local function get_update_state()
   return update_state
 end
-
+
+  return {
+    update_check = update_check,
+    get_update_state = get_update_state,
+    update_configured = update_configured,
+    http_get_raw = http_get_raw,
+    ensure_parent_dir = ensure_parent_dir,
+  }
+end)()
 local function append_event(ev)
   ensure_dirs()
   local line = json.encode(ev) or '{}'
@@ -1187,7 +1195,8 @@ local function get_self_info()
   return info
 end
 
--- ===================== HELP (public → admin) =====================
+-- ===================== HELP (public → admin) =====================
+local helpmod = (function()
 local help_tickets = {}
 local help_state = {
   busy = false,
@@ -1399,7 +1408,7 @@ local function help_poll_replies(force)
   if force then help_state.status = 'проверка ответов…' end
   lua_thread.create(function()
     local ok = pcall(function()
-      local resp, herr = http_get_raw(HELP_REPLIES_URL)
+      local resp, herr = extras.http_get_raw(HELP_REPLIES_URL)
       help_state.poll_at = os.time()
       if not resp or (tonumber(resp.status_code) or 0) ~= 200 then
         if force then help_state.status = herr or 'нет help_replies.json' end
@@ -1420,23 +1429,19 @@ local function help_poll_replies(force)
     help_state.busy = false
   end)
 end
-
-  return {
-    update_check = update_check,
-    get_update_state = get_update_state,
-    update_configured = update_configured,
-    help_configured = help_configured,
-    help_send = help_send,
-    help_poll_replies = help_poll_replies,
-    help_get_tickets = help_get_tickets,
-    help_get_state = help_get_state,
-    help_get_sel = help_get_sel,
-    help_set_sel = help_set_sel,
-    help_load_tickets = help_load_tickets,
-    help_ensure_client_id = help_ensure_client_id,
-  }
-end)()
-
+
+  return {
+    help_configured = help_configured,
+    help_send = help_send,
+    help_poll_replies = help_poll_replies,
+    help_get_tickets = help_get_tickets,
+    help_get_state = help_get_state,
+    help_get_sel = help_get_sel,
+    help_set_sel = help_set_sel,
+    help_load_tickets = help_load_tickets,
+    help_ensure_client_id = help_ensure_client_id,
+  }
+end)()
 local function get_nearby_players(radius, limit)
   radius = tonumber(radius) or 50
   limit = tonumber(limit) or 28
@@ -2780,14 +2785,14 @@ P.SCRIPT_VERSION = SCRIPT_VERSION
 P.update_check = extras.update_check
 P.get_update_state = extras.get_update_state
 P.update_configured = extras.update_configured
-P.help_configured = extras.help_configured
-P.help_send = extras.help_send
-P.help_poll_replies = extras.help_poll_replies
-P.help_get_tickets = extras.help_get_tickets
-P.help_get_state = extras.help_get_state
-P.help_get_sel = extras.help_get_sel
-P.help_set_sel = extras.help_set_sel
-P.help_load_tickets = extras.help_load_tickets
+P.help_configured = helpmod.help_configured
+P.help_send = helpmod.help_send
+P.help_poll_replies = helpmod.help_poll_replies
+P.help_get_tickets = helpmod.help_get_tickets
+P.help_get_state = helpmod.help_get_state
+P.help_get_sel = helpmod.help_get_sel
+P.help_set_sel = helpmod.help_set_sel
+P.help_load_tickets = helpmod.help_load_tickets
 P.read_char_buf = read_char_buf
 
 imgui.OnFrame(
@@ -2835,8 +2840,8 @@ function main()
   end
   sync_ui_from_cfg()
   load_state()
-  extras.help_load_tickets()
-  extras.help_ensure_client_id()
+  helpmod.help_load_tickets()
+  helpmod.help_ensure_client_id()
   local nforms = load_form_cmds()
   do
     local cached = read_file(EVENTS_CACHE)
@@ -2860,7 +2865,7 @@ function main()
   lua_thread.create(function()
     wait(12000)
     while true do
-      extras.help_poll_replies(false)
+      helpmod.help_poll_replies(false)
       wait(30000)
     end
   end)
