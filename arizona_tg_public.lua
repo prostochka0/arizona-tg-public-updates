@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.9-public')
+script_version('1.0.10-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.9-public'
+local SCRIPT_VERSION = '1.0.10-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.

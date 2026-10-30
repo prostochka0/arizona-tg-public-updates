@@ -287,8 +287,7 @@ local function switch_nav_tab(P, tab)
   reset_tab_anim()
   if tab == 2 then P.sync_ui_from_cfg() end
   if tab == 3 then P.sync_clips_ui() end
-  if (tab == 6 or tab == 7) and P.events_fetch then P.events_fetch(false) end
-  if tab == 8 and P.help_poll_replies then P.help_poll_replies(true) end
+  -- без HTTP на клике: requests блокирует весь клиент
 end
 
 local function nav_tab_at_y(my)
@@ -825,10 +824,7 @@ end
 
 local function draw_events(P)
   local imgui, C = P.imgui, P.C
-  if anim.need_events_fetch and P.events_fetch then
-    anim.need_events_fetch = false
-    P.events_fetch(false)
-  end
+  anim.need_events_fetch = false
   local st = P.events_get_state and P.events_get_state() or {}
   local all_list = P.events_get_list and P.events_get_list() or {}
   local today_list = st.today_list or {}
@@ -1192,10 +1188,7 @@ end
 
 local function draw_orgs(P)
   local imgui, C = P.imgui, P.C
-  if anim.need_events_fetch and P.events_fetch then
-    anim.need_events_fetch = false
-    P.events_fetch(false)
-  end
+  anim.need_events_fetch = false
   local st = P.events_get_state and P.events_get_state() or {}
   local day_ago = (anim.org_day == 1) and 1 or 0
   local list, day_mp, day_str = {}, 0, ''
@@ -2674,7 +2667,7 @@ function M.on_open()
   anim.win_t = 0
   anim.tab_fade = 0
   reset_tab_anim()
-  anim.need_events_fetch = true
+  anim.need_events_fetch = false
 end
 
 return M
