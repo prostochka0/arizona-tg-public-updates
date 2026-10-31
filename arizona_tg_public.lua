@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.13-public')
+script_version('1.0.14-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.13-public'
+local SCRIPT_VERSION = '1.0.14-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -380,34 +380,33 @@ local MP_RECOMMENDED = {
   'Гонки',
 }
 
+-- ключи/значения — уже в «словарной» форме (после mp_norm)
 local MP_ALIASES = {
   ['король uzi'] = 'король узи',
   ['король узичек'] = 'король узи',
-  ['король узи'] = 'король узи',
   ['вышибала'] = 'вышибалы',
-  ['вышибалы'] = 'вышибалы',
-  ['главный жнец'] = 'главный жнец',
   ['добраться до чилиада'] = 'добраться до чиллиада',
-  ['добраться до чиллиада'] = 'добраться до чиллиада',
+  ['добраться до чилиада на болиде'] = 'добраться до чиллиада',
   ['добраться до чиллиада на болиде'] = 'добраться до чиллиада',
-  ['король цг'] = 'король цг',
   ['король центра гетто'] = 'король цг',
   ['король цетра гетто'] = 'король цг',
   ['король диглов'] = 'король дигла',
-  ['король дигла'] = 'король дигла',
-  ['перестрелка в казино'] = 'перестрелка в казино',
   ['перестрелки в пустынке'] = 'перестрелка в пустыне',
   ['перестрелка в пустынном городе'] = 'перестрелка в пустыне',
+  ['перестрелки в пустыне'] = 'перестрелка в пустыне',
   ['гонка в пустыне'] = 'гонки в пустыне',
   ['гонки лв - лс'] = 'гонки лв-лс',
   ['гонки лс - лв'] = 'гонки лв-лс',
+  ['гонки лс-лв'] = 'гонки лв-лс',
   ['гонки к лса'] = 'гонки лв-лс',
   ['гонки на чиллиаде'] = 'гонки на чиллиад',
+  ['гонки на чилиад'] = 'гонки на чиллиад',
   ['неоновые гонки'] = 'неоновый заезд',
+  ['неоновый заезд'] = 'неоновый заезд',
+  ['неон заезд'] = 'неоновый заезд',
   ['поливалка'] = 'поливалки',
-  ['третий лишний'] = 'третий лишний',
-  ['игра в кальмара'] = 'игра в кальмара',
-  ['добраться до чиллиада'] = 'добраться до чиллиада',
+  ['воздушная гонка'] = 'воздушные гонки',
+  ['военное сражение'] = 'военные сражения',
 }
 local ROUND = 16
 local theme_textures = {}
@@ -441,10 +440,64 @@ local function trim(s)
   return (tostring(s):gsub('^%s+', ''):gsub('%s+$', ''))
 end
 
+-- string.lower не трогает кириллицу → «Неоновый Заезд» ≠ «Неоновый заезд»
+local function mp_casefold(s)
+  s = tostring(s or '')
+  local utf = s:find('\208') or s:find('\209')
+  local out, i, n = {}, 1, #s
+  while i <= n do
+    local b = s:byte(i)
+    if utf and b == 0xD0 and i < n then
+      local b2 = s:byte(i + 1)
+      if b2 == 0x81 then
+        out[#out + 1] = '\208\181' -- Ё → е
+      elseif b2 >= 0x90 and b2 <= 0x9F then
+        out[#out + 1] = string.char(0xD0, b2 + 0x20)
+      elseif b2 >= 0xA0 and b2 <= 0xAF then
+        out[#out + 1] = string.char(0xD1, b2 - 0x20)
+      else
+        out[#out + 1] = string.char(b, b2)
+      end
+      i = i + 2
+    elseif utf and b == 0xD1 and i < n then
+      local b2 = s:byte(i + 1)
+      if b2 == 0x91 then
+        out[#out + 1] = '\208\181' -- ё → е
+      else
+        out[#out + 1] = string.char(b, b2)
+      end
+      i = i + 2
+    elseif (not utf) and b == 0xA8 then
+      out[#out + 1] = string.char(0xE5)
+      i = i + 1
+    elseif (not utf) and b == 0xB8 then
+      out[#out + 1] = string.char(0xE5)
+      i = i + 1
+    elseif (not utf) and b >= 0xC0 and b <= 0xDF then
+      out[#out + 1] = string.char(b + 0x20)
+      i = i + 1
+    elseif b < 128 then
+      if b >= 65 and b <= 90 then b = b + 32 end
+      out[#out + 1] = string.char(b)
+      i = i + 1
+    else
+      out[#out + 1] = string.char(b)
+      i = i + 1
+    end
+  end
+  return table.concat(out)
+end
+
 local function mp_norm(name)
   name = tostring(name or '')
-  name = name:gsub('\194\160', ' '):gsub('%s+', ' ')
-  name = trim(name):lower()
+  name = name:gsub('\194\160', ' ')
+  name = name:gsub('\160', ' ')
+  name = name:gsub('\226\128\148', '-'):gsub('\226\128\149', '-'):gsub('\226\128\150', '-')
+  name = name:gsub('%-+', '-')
+  name = name:gsub('%s*%-%s*', '-')
+  name = name:gsub('%s+', ' ')
+  name = trim(name)
+  name = mp_casefold(name)
   if MP_ALIASES[name] then return MP_ALIASES[name] end
   return name
 end
