@@ -824,7 +824,10 @@ end
 
 local function draw_events(P)
   local imgui, C = P.imgui, P.C
-  anim.need_events_fetch = false
+  if anim.need_events_fetch and P.events_fetch then
+    anim.need_events_fetch = false
+    P.events_fetch(false)
+  end
   local st = P.events_get_state and P.events_get_state() or {}
   local all_list = P.events_get_list and P.events_get_list() or {}
   local today_list = st.today_list or {}
@@ -1188,7 +1191,10 @@ end
 
 local function draw_orgs(P)
   local imgui, C = P.imgui, P.C
-  anim.need_events_fetch = false
+  if anim.need_events_fetch and P.events_fetch then
+    anim.need_events_fetch = false
+    P.events_fetch(false)
+  end
   local st = P.events_get_state and P.events_get_state() or {}
   local day_ago = (anim.org_day == 1) and 1 or 0
   local list, day_mp, day_str = {}, 0, ''
@@ -2667,7 +2673,8 @@ function M.on_open()
   anim.win_t = 0
   anim.tab_fade = 0
   reset_tab_anim()
-  anim.need_events_fetch = false
+  -- сеть только после открытия меню / вкладки (не на старте GTA)
+  anim.need_events_fetch = true
 end
 
 return M

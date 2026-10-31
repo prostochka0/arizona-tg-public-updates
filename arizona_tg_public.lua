@@ -10,7 +10,7 @@
   4) Меню: Numpad Del или /tgpub
   5) Настройки → впиши Bot Token и Chat ID → Сохранить
   6) Проверка: /tgptest
-  7) Автообновление: при старте (нужен UPDATE_OWNER на GitHub)
+  7) Обновление: /tgpubupdate или кнопка в меню (не на старте — иначе краш)
 
   Токен: @BotFather → /newbot
   Chat id: напиши боту /start, затем
@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.12-public')
+script_version('1.0.13-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.12-public'
+local SCRIPT_VERSION = '1.0.13-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -119,7 +119,29 @@ local function cp(s)
 end
 
 local sampev = require 'lib.samp.events'
-local requests = require 'requests'
+local _requests_mod = require 'requests'
+local http_inflight = 0
+local script_alive = true
+local samp_ready_at = 0
+local BOOT_NET_GRACE = 20 -- сек после входа: авто/ранний HTTP откладываем (lua51 + Helper)
+local requests = setmetatable({}, {
+  __index = function(_, k)
+    local v = _requests_mod[k]
+    if type(v) == 'function'
+        and (k == 'get' or k == 'post' or k == 'put' or k == 'delete' or k == 'head' or k == 'request') then
+      return function(...)
+        if not script_alive then return nil end
+        http_inflight = http_inflight + 1
+        local ok, a, b, c = pcall(v, ...)
+        http_inflight = http_inflight - 1
+        if http_inflight < 0 then http_inflight = 0 end
+        if not ok then return nil end
+        return a, b, c
+      end
+    end
+    return v
+  end,
+})
 local json = require 'cjson.safe'
 local ok_ipc, ipc = pcall(require, 'arizona_ipc_public')
 if not ok_ipc then
@@ -300,6 +322,7 @@ local events_state = {
   status = 'idle', -- idle|loading|ok|err
   err = '',
   updated = 0,
+  fetched_at = 0, -- только после сети; кэш не блокирует «Обновить»
   today = '',
   done = {}, -- norm -> { name, time, org, raw }
   today_list = {}, -- chronological rows for today
@@ -668,11 +691,29 @@ end
 
 local function update_check(force, silent)
   if update_state.busy then return end
+  if not script_alive then return end
   if not update_configured() then
     update_state.status = 'disabled'
     update_state.msg = 'укажи UPDATE_OWNER в скрипте'
     if not silent then chat('Автообновление не настроено (UPDATE_OWNER)') end
     return
+  end
+  if samp_ready_at > 0 then
+    local age = os.time() - samp_ready_at
+    if age < BOOT_NET_GRACE then
+      if update_state._net_deferred then return end
+      update_state._net_deferred = true
+      local delay_ms = (BOOT_NET_GRACE - age) * 1000
+      if delay_ms < 500 then delay_ms = 500 end
+      update_state.status = 'checking'
+      update_state.msg = 'подожди ' .. tostring(BOOT_NET_GRACE - age) .. 'с…'
+      lua_thread.create(function()
+        wait(delay_ms)
+        update_state._net_deferred = false
+        if script_alive then update_check(force, silent) end
+      end)
+      return
+    end
   end
   if not force and update_state.checked_at > 0 and (os.time() - update_state.checked_at) < 120 then
     return
@@ -2006,6 +2047,7 @@ local function ensure_ui_frame()
   local ok = pcall(function()
     imgui.OnFrame(
       function()
+        if not script_alive then return false end
         local vok, vis = pcall(function()
           return P.showMenu[0] or (menu_ui.is_visible and menu_ui.is_visible())
         end)
@@ -2022,6 +2064,25 @@ local function ensure_ui_frame()
   end
   return ui_frame_ready
 end
+
+do
+  local path = thisScript().path
+  _G.__ML_RELOAD_GUARD = _G.__ML_RELOAD_GUARD or {}
+  _G.__ML_RELOAD_GUARD[path] = function()
+    return http_inflight > 0
+  end
+end
+
+addEventHandler('onScriptTerminate', function(scr)
+  if scr ~= thisScript() then return end
+  script_alive = false
+  if _G.__ML_RELOAD_GUARD then
+    _G.__ML_RELOAD_GUARD[scr.path] = nil
+  end
+  pcall(function()
+    if showMenu then showMenu[0] = false end
+  end)
+end)
 
 local function open_menu(tab)
   if not ensure_ui_frame() then return end
@@ -2185,7 +2246,7 @@ local function fmt_org_money(n)
   return tostring(math.floor(n))
 end
 
-local function events_apply_csv(raw, yieldable)
+local function events_apply_csv(raw, yieldable, from_net)
   raw = tostring(raw or '')
   local today = events_today_str()
   local done, today_list, rows = {}, {}, {}
@@ -2237,8 +2298,11 @@ local function events_apply_csv(raw, yieldable)
   events_state.today_list = today_list
   events_state.rows = rows
   events_state.updated = os.time()
+  if from_net then
+    events_state.fetched_at = os.time()
+  end
   events_state.status = 'ok'
-  events_state.err = ''
+  events_state.err = from_net and '' or 'кэш'
 end
 
 local function events_hdr(headers, key)
@@ -2296,7 +2360,27 @@ end
 
 local function events_fetch(force)
   if events_state.loading then return end
-  if not force and events_state.updated > 0 and (os.time() - events_state.updated) < 90 then
+  if not script_alive then return end
+  -- первые секунды после входа HTTP часто роняет lua51 вместе с Helper/Tools
+  if samp_ready_at > 0 then
+    local age = os.time() - samp_ready_at
+    if age < BOOT_NET_GRACE then
+      if events_state._net_deferred then return end
+      events_state._net_deferred = true
+      local delay_ms = (BOOT_NET_GRACE - age) * 1000
+      if delay_ms < 500 then delay_ms = 500 end
+      events_state.status = 'loading'
+      lua_thread.create(function()
+        wait(delay_ms)
+        events_state._net_deferred = false
+        if script_alive then events_fetch(force) end
+      end)
+      return
+    end
+  end
+  local today_empty = #(events_state.today_list or {}) == 0
+  if not force and not today_empty and events_state.fetched_at > 0
+      and (os.time() - events_state.fetched_at) < 90 then
     return
   end
   events_state.loading = true
@@ -2314,6 +2398,7 @@ local function events_fetch(force)
     }
     local body, last_code = nil, 0
     for i = 1, #urls do
+      if not script_alive then break end
       local resp = select(1, events_http_get(urls[i]))
       if type(resp) == 'table' then
         last_code = tonumber(resp.status_code) or 0
@@ -2329,10 +2414,11 @@ local function events_fetch(force)
       end
     end
     events_state.loading = false
+    if not script_alive then return end
     if not body then
       local cached = read_file(EVENTS_CACHE)
       if cached and cached ~= '' then
-        events_apply_csv(cached, true)
+        events_apply_csv(cached, true, false)
         events_state.status = 'ok'
         events_state.err = 'кэш (HTTP ' .. tostring(last_code) .. ')'
         chat('МП: не обновилось, показан кэш')
@@ -2345,8 +2431,7 @@ local function events_fetch(force)
     end
     ensure_dirs()
     write_file(EVENTS_CACHE, body)
-    events_apply_csv(body, true)
-    events_state.err = ''
+    events_apply_csv(body, true, true)
     local n = 0
     for _ in pairs(events_state.done) do n = n + 1 end
     chat(string.format('МП Space: сегодня %d уникальных / %d записей', n, #events_state.today_list))
@@ -3073,6 +3158,7 @@ function main()
     touch_activity()
     while not isSampAvailable() do wait(100) end
     wait(2000)
+    samp_ready_at = os.time()
     pcall(function()
       chat(string.format(
         'TG Public %s | Del /tgpub | /tgpubstatus | /tgptest',
@@ -3130,8 +3216,9 @@ function main()
       chat(ok and ('Конфиг перечитан, форм: ' .. n) or ('Нет токена в Настройках, форм: ' .. n))
     end)
 
-    while true do
+    while script_alive do
       wait(2000)
+      if not script_alive then break end
       pcall(function()
         if cfg.watch_queue or cfg.reports then
           local q = read_tools_queue()
