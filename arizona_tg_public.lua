@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.14-public')
+script_version('1.0.15-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.14-public'
+local SCRIPT_VERSION = '1.0.15-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -2592,20 +2592,15 @@ end
 local function events_hide_rec(key_or_name)
   local key = mp_norm(key_or_name)
   if key == '' then return false end
-  -- кастомные — убираем из extra; канон — прячем
   local kept = {}
-  local was_extra = false
   for i = 1, #mp_extra do
-    if mp_norm(mp_extra[i]) == key then
-      was_extra = true
-    else
+    if mp_norm(mp_extra[i]) ~= key then
       kept[#kept + 1] = mp_extra[i]
     end
   end
   mp_extra = kept
-  if not was_extra then
-    mp_hidden[key] = true
-  end
+  -- всегда hidden: иначе имя из канона/таблицы снова всплывёт
+  mp_hidden[key] = true
   if events_rename_key == key then events_rename_key = nil end
   save_state()
   return true
@@ -2770,18 +2765,13 @@ local function events_hide_helper(key_or_name)
   local key = mp_norm(key_or_name)
   if key == '' then return false end
   local kept = {}
-  local was_extra = false
   for i = 1, #helper_extra do
-    if mp_norm(helper_extra[i]) == key then
-      was_extra = true
-    else
+    if mp_norm(helper_extra[i]) ~= key then
       kept[#kept + 1] = helper_extra[i]
     end
   end
   helper_extra = kept
-  if not was_extra then
-    helper_hidden[key] = true
-  end
+  helper_hidden[key] = true
   save_state()
   return true
 end
@@ -2995,18 +2985,14 @@ local function events_hide_org(key_or_name)
   local key = mp_norm(key_or_name)
   if key == '' then return false end
   local kept = {}
-  local was_extra = false
   for i = 1, #org_extra do
-    if mp_norm(org_extra[i]) == key then
-      was_extra = true
-    else
+    if mp_norm(org_extra[i]) ~= key then
       kept[#kept + 1] = org_extra[i]
     end
   end
   org_extra = kept
-  if not was_extra then
-    org_hidden[key] = true
-  end
+  -- всегда hidden: иначе ник из таблицы Space снова в «Все следящие»
+  org_hidden[key] = true
   save_state()
   return true
 end
