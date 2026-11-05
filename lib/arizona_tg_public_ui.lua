@@ -1082,7 +1082,16 @@ local function draw_events(P)
   -- ===== справа: сегодня =====
   imgui.SameLine(0, gap)
   imgui.BeginChild('##ev_today', imgui.ImVec2(rightW, bodyH), false)
-  imgui.TextColored(C.muted, string.format('Сегодня · %d', #today_list))
+  do
+    local day_lbl = 'Сегодня'
+    if st.today and tostring(st.today) ~= '' then
+      local cal = os.date('%d.%m.%Y')
+      if tostring(st.today) ~= cal then
+        day_lbl = string.format('Сегодня · %s', tostring(st.today):sub(1, 5))
+      end
+    end
+    imgui.TextColored(C.muted, string.format('%s · %d', day_lbl, #today_list))
+  end
   imgui.Dummy(imgui.ImVec2(0, 4))
   imgui.BeginChild('##ev_today_list', imgui.ImVec2(0, -1), false)
   if #today_list == 0 then
@@ -1429,7 +1438,8 @@ local function draw_orgs(P)
   do
     local day_title = (day_ago == 1) and 'Вчера' or 'Сегодня'
     local switch_to = (day_ago == 1) and 'сегодня' or 'вчера'
-    local label = string.format('%s · %d МП', day_title, day_mp)
+    local week_mp = tonumber(smeta.week_mp) or 0
+    local label = string.format('%s · %d МП · неделя %d', day_title, day_mp, week_mp)
     local lw = imgui.CalcTextSize(label).x + 4
     if imgui.InvisibleButton('##org_day', imgui.ImVec2(lw, 16)) then
       anim.org_day = (day_ago == 1) and 0 or 1
@@ -1579,15 +1589,21 @@ local function draw_orgs(P)
 
   -- ===== все следящие + добавление =====
   do
+    local week_mp = tonumber(smeta.week_mp) or 0
     imgui.TextColored(C.muted, string.format('Все следящие · %d', #stats))
     if smeta.week_from then
       imgui.SameLine(0, 10)
       imgui.TextColored(
         C.muted,
-        string.format('%s–%s · прошл. %s–%s',
+        string.format('неделя %d МП · %s–%s · прошл. %d МП · %s–%s',
+          week_mp,
           tostring(smeta.week_from), tostring(smeta.week_to),
+          tonumber(smeta.prev_mp) or 0,
           tostring(smeta.prev_from), tostring(smeta.prev_to))
       )
+    elseif week_mp > 0 then
+      imgui.SameLine(0, 10)
+      imgui.TextColored(C.muted, string.format('неделя · %d МП', week_mp))
     end
   end
 

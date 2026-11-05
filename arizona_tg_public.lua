@@ -22,10 +22,10 @@
 
 script_name('Arizona TG Public')
 script_author('community')
-script_version('1.0.15-public')
+script_version('1.0.16-public')
 script_properties('work-in-pause')
 
-local SCRIPT_VERSION = '1.0.15-public'
+local SCRIPT_VERSION = '1.0.16-public'
 
 -- Автообновление: один раз создай публичный GitHub-репо и впиши owner/repo ниже.
 -- Пока YOUR_GITHUB_USER — проверка пропускается.
@@ -2249,8 +2249,24 @@ end
 
 local Ev = (function()
 
+-- если в таблице уже есть строки на завтра — считаем, что новый день начался
+local function events_resolve_active_day(rows)
+  local cal_today = os.date('%d.%m.%Y')
+  local cal_tomorrow = os.date('%d.%m.%Y', os.time() + 86400)
+  rows = rows or {}
+  for i = 1, #rows do
+    if rows[i] and rows[i].date == cal_tomorrow then
+      return cal_tomorrow
+    end
+  end
+  return cal_today
+end
+
 local function events_today_str()
-  return os.date('%d.%m.%Y')
+  if events_state.today and events_state.today ~= '' then
+    return events_state.today
+  end
+  return events_resolve_active_day(events_state.rows)
 end
 
 local function parse_prize(s)
@@ -2301,7 +2317,6 @@ end
 
 local function events_apply_csv(raw, yieldable, from_net)
   raw = tostring(raw or '')
-  local today = events_today_str()
   local done, today_list, rows = {}, {}, {}
   local nline = 0
   for line in raw:gmatch('[^\r\n]+') do
@@ -2327,20 +2342,24 @@ local function events_apply_csv(raw, yieldable, from_net)
           ts = ts,
           raw = dt,
         }
-        if date_part == today then
-          local key = mp_norm(title)
-          local row = {
-            name = title,
-            time = time_part,
-            org = org,
-            prize = prize,
-            raw = dt,
-            key = key,
-          }
-          today_list[#today_list + 1] = row
-          done[key] = row
-        end
       end
+    end
+  end
+  local today = events_resolve_active_day(rows)
+  for i = 1, #rows do
+    local r = rows[i]
+    if r.date == today then
+      local key = mp_norm(r.name)
+      local row = {
+        name = r.name,
+        time = r.time,
+        org = r.org,
+        prize = r.prize,
+        raw = r.raw,
+        key = key,
+      }
+      today_list[#today_list + 1] = row
+      done[key] = row
     end
   end
   table.sort(today_list, function(a, b)
@@ -2667,7 +2686,9 @@ end
 local function events_date_str_ago(days_ago)
   days_ago = tonumber(days_ago) or 0
   if days_ago < 0 then days_ago = 0 end
-  return os.date('%d.%m.%Y', os.time() - days_ago * 86400)
+  local active = events_today_str()
+  local ts = parse_date_ts(active) or os.time()
+  return os.date('%d.%m.%Y', ts - days_ago * 86400)
 end
 
 -- days_ago: 0 = сегодня, 1 = вчера
@@ -2785,8 +2806,8 @@ end
 
 -- помощники: неделя / прошлая / за всё время (все после первого, кроме ведущих)
 local function events_get_helpers_stats()
-  local now = os.time()
-  local week0 = week_monday_ts(now)
+  local active_ts = parse_date_ts(events_today_str()) or os.time()
+  local week0 = week_monday_ts(active_ts)
   local week1 = week0 + 7 * 86400
   local prev0 = week0 - 7 * 86400
   local leaders = events_org_leaders_set()
@@ -2908,11 +2929,13 @@ end
 
 -- все следящие: неделя / прошлая / за всё время
 local function events_get_orgs_stats()
-  local now = os.time()
-  local week0 = week_monday_ts(now)
+  local active_ts = parse_date_ts(events_today_str()) or os.time()
+  local week0 = week_monday_ts(active_ts)
   local week1 = week0 + 7 * 86400
   local prev0 = week0 - 7 * 86400
   local map = {}
+  local week_mp = 0
+  local prev_mp = 0
 
   local function ensure(org)
     local key = mp_norm(org)
@@ -2940,12 +2963,17 @@ local function events_get_orgs_stats()
   local rows = events_state.rows or {}
   for i = 1, #rows do
     local r = rows[i]
+    local ts = tonumber(r.ts)
+    if ts and ts >= week0 and ts < week1 then
+      week_mp = week_mp + 1
+    elseif ts and ts >= prev0 and ts < week0 then
+      prev_mp = prev_mp + 1
+    end
     local org = org_primary(r.org)
     if org ~= '' then
       local e = ensure(org)
       if e then
         e.all_n = e.all_n + 1
-        local ts = tonumber(r.ts)
         local pay = tonumber(r.pay) or org_pay_for_prize(r.prize)
         if ts and ts >= week0 and ts < week1 then
           e.week_n = e.week_n + 1
@@ -2977,6 +3005,8 @@ local function events_get_orgs_stats()
     week_to = os.date('%d.%m', week1 - 86400),
     prev_from = os.date('%d.%m', prev0),
     prev_to = os.date('%d.%m', week0 - 86400),
+    week_mp = week_mp,
+    prev_mp = prev_mp,
   }
   return out, meta
 end
